@@ -1,24 +1,16 @@
 import os
+import glob
 from pathlib import Path
 import pandas as pd
+import time
 from log_trans import modify_log_data
-from trace_trans import (
-    calculate_end_time_unix_nano,
-    process_trace_data,
-)
+from trace_trans import calculate_end_time_unix_nano, process_trace_data
 from metric import (
-    read_csv_file,
-    create_output_folder,
     split_and_save_by_service,
-    normalize_bucket_counts,
-    process_bucket_counts,
-    process_files_in_folder,
     calculate_weighted_sum,
     add_latency_columns,
-    re_read_csv_file,
-    process_data,
-    save_to_csv,
     process_folder,
+    process_files_in_folder,
 )
 from merge import (
     process_data_merge,
@@ -27,25 +19,28 @@ from merge import (
     trans_nezha,
 )
 
+def log_runner(input_dir, output_dir):
+    # print(f"Processing log data from {input_dir} to {output_dir}...")
+    modify_log_data(input_dir, output_dir)
 
-def log_trans_runner(input_dir, output_dir, log_output_file):
-    modify_log_data(input_dir, output_dir, log_output_file)
 
+def trace_runner(input_dir, output_dir, traceid_output_dir):
+    output_file = output_dir / "trace.csv"
+    calculate_end_time_unix_nano(input_dir, output_file)
+    process_trace_data(output_file, output_dir, traceid_output_dir)
 
-def trace_trans_runner(input_dir, output_dir, trace_output_path):
-    calculate_end_time_unix_nano(input_dir, output_dir)
-    process_trace_data(output_dir, trace_output_path)
 
 def metric_runner(input_dir, output_dir):
-    df = read_csv_file(input_dir)
-    create_output_folder(output_dir)
+
+    df =pd.read_csv(input_dir)
+    os.makedirs(output_dir, exist_ok=True)
     split_and_save_by_service(df, output_dir)
     process_files_in_folder(output_dir)
 
-    # 定义权重
+    
+    # Define weights for latency calculations
     weights = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 10]
 
-    # 计算加权和并添加到文件
     for filename in os.listdir(output_dir):
         if filename.endswith('.csv'):
             file_path = os.path.join(output_dir, filename)
@@ -64,7 +59,8 @@ def metric_runner(input_dir, output_dir):
             df.to_csv(file_path, index=False)
             print(f"Updated and saved {file_path}")
     process_folder(output_dir, output_dir)
-    
+
+
 def merge_runner(input_dir, output_dir, merged_output_dir, output_folder, metric_output_path):
     if not os.path.exists(input_dir):
         os.makedirs(input_dir)
@@ -75,9 +71,10 @@ def merge_runner(input_dir, output_dir, merged_output_dir, output_folder, metric
             input_file = os.path.join(input_dir, filename)
             output_file = os.path.join(output_folder, f'{filename}')
             try:
-                df = read_csv_file(input_file)
+                df = pd.read_csv(input_file)
                 result = process_data_merge(df)
-                save_to_csv(result, output_file)
+                result.to_csv(output_file, index=False)
+
                 print(f"结果已保存到 {output_file}")
             except KeyError as e:
                 print(f"跳过文件 {filename}，错误：{e}")
@@ -86,53 +83,6 @@ def merge_runner(input_dir, output_dir, merged_output_dir, output_folder, metric
     merge_files(output_dir, output_folder, merged_output_dir)
     trans_nezha(merged_output_dir, metric_output_path)
 
-def merge_abnormal_normal_to_overall(prefix_dir):
-    """
-    Merges the CSV files from 'abnormal' and 'normal' directories, 
-    including their 'processed_metrics' subdirectories, into an 'overall' directory.
-
-    :param prefix_dir: Path object pointing to the directory containing 'abnormal' and 'normal' folders.
-    """
-    abnormal_dir = prefix_dir / "abnormal"
-    normal_dir = prefix_dir / "normal"
-    overall_dir = prefix_dir / "overall"
-    overall_dir.mkdir(parents=True, exist_ok=True)  # Create the 'overall' directory if it doesn't exist
-
-    # Define all directories to process
-    sub_dirs = ["", "processed_metrics"]
-
-    for sub_dir in sub_dirs:
-        abnormal_sub_dir = abnormal_dir / sub_dir
-        normal_sub_dir = normal_dir / sub_dir
-        overall_sub_dir = overall_dir / sub_dir
-
-        # Ensure the corresponding overall subdirectory exists
-        overall_sub_dir.mkdir(parents=True, exist_ok=True)
-
-        # Identify common CSV files in both subdirectories
-        abnormal_files = set(f.name for f in abnormal_sub_dir.glob("*.csv") if f.is_file())
-        normal_files = set(f.name for f in normal_sub_dir.glob("*.csv") if f.is_file())
-        common_files = abnormal_files & normal_files
-
-        for file_name in common_files:
-            try:
-                # Read files from abnormal and normal
-                abnormal_file = abnormal_sub_dir / file_name
-                normal_file = normal_sub_dir / file_name
-
-                df_abnormal = pd.read_csv(abnormal_file)
-                df_normal = pd.read_csv(normal_file)
-
-                # Combine the data
-                combined_df = pd.concat([df_normal, df_abnormal], ignore_index=True)
-
-                # Save to the 'overall' subdirectory
-                combined_file = overall_sub_dir / file_name
-                combined_df.to_csv(combined_file, index=False)
-                print(f"Merged {file_name} into {combined_file}")
-            except Exception as e:
-                print(f"Error merging {file_name} in {sub_dir}: {e}")
-                
 
 def process_metric(metric_path, metric_output_path):
     df = pd.read_csv(metric_path)
@@ -146,59 +96,56 @@ def process_metric(metric_path, metric_output_path):
     first_columns = ['Time', 'TimeStamp', 'PodName']
     other_columns = [col for col in df.columns if col not in first_columns]
     df = df[first_columns + other_columns]
-    output_file_path = os.path.join(metric_output_path,   os.path.basename(metric_path))
+    output_file_path = os.path.join(metric_output_path, os.path.basename(metric_path))
     df.to_csv(output_file_path, index=False)
 
 
 def main():
-    root_base_dir = Path(r"E:\Project\Git\RCA_Dataset\test\ts-small")
-    output_base_dir = Path(r"E:\Project\Git\RCA_Dataset\test\nezha-ts-small")
+    root_base_dir = Path(r"E:\Project\Git\git\testset\ts-1024")
+    output_base_dir = Path(r"E:\Project\Git\git\testset\nezha-ts-normal")
+    # output_base_dir = Path(r"E:\Project\Git\git\testset\nezha-ts-1024")
 
-    log_output_path = output_base_dir / 'log.csv'
-    trace_output_path = output_base_dir / 'trace.csv'
+    # Ensure output directories exist
+    output_base_dir.mkdir(parents=True, exist_ok=True)
     metric_output_path = output_base_dir / 'metric'
-    
-    for existing_file in os.listdir(metric_output_path):
-        file_path = os.path.join(metric_output_path, existing_file)
-        if os.path.isfile(file_path):
-            os.remove(file_path)
-    
-    output_base_dir.mkdir(parents=True, exist_ok=True)  # Ensure the base output directory exists
+    metric_output_path.mkdir(parents=True, exist_ok=True)
+
+    log_output_path = output_base_dir / "log"
+    log_output_path.mkdir(parents=True, exist_ok=True)
+
+    trace_output_path = output_base_dir / "trace"
+    trace_output_path.mkdir(parents=True, exist_ok=True)
+
+    traceid_output_path = output_base_dir / "traceid"
+    traceid_output_path.mkdir(parents=True, exist_ok=True)
+
     for prefix_dir in root_base_dir.iterdir():
         if prefix_dir.is_dir():
-            # 合并normal和abnormal的数据到overall目录
-            merge_abnormal_normal_to_overall(prefix_dir)
+            # Process only abnormal data
+            # abnormal_dir = prefix_dir / "abnormal"
+            abnormal_dir = prefix_dir / "normal"
 
-            subdir_name = prefix_dir.name  # Use the name of the subdirectory to create output paths
-            output_dir_sub = output_base_dir / subdir_name
-            output_dir_sub.mkdir(parents=True, exist_ok=True)  # Ensure subdirectory exists in output base
+            subdir_name = prefix_dir.name  # 故障名
+            sub_dir = output_base_dir / subdir_name
+            sub_dir.mkdir(parents=True, exist_ok=True)
+            sub_request_dir = sub_dir / "request"
+            sub_request_dir.mkdir(parents=True, exist_ok=True)
+            sub_metric_dir = sub_dir / "metric"
+            sub_metric_dir.mkdir(parents=True, exist_ok=True)
+            input_processed_metrics_dir = abnormal_dir / 'processed_metrics'
+            output_processed_metrics_dir = abnormal_dir / 'nezha_processed_metrics'
+            output_processed_metrics_dir.mkdir(parents=True, exist_ok=True)
+            
+            log_runner(abnormal_dir / "logs.csv", log_output_path)
+            # trace_runner(abnormal_dir / "traces.csv", trace_output_path, traceid_output_path)
 
-            input_dir_log = prefix_dir / 'overall/logs.csv'
-            output_dir_log = output_dir_sub / 'Nezha_log.csv'
-            input_dir_trace = prefix_dir / 'overall/traces.csv'
-            output_dir_trace = output_dir_sub / 'Nezha_traces.csv'
-            input_dir_metric = prefix_dir / 'overall/request_metrics.csv'
-            output_dir_metric = output_dir_sub / 'Nezha_output_files'
-            input_dir_merge = prefix_dir / 'overall/processed_metrics'
-            output_dir_merge = output_dir_sub / 'Nezha_output_files'
-            output_dir_merge_output = output_dir_sub / 'Nezha_merged_output'
-            output_folder = output_dir_sub / 'overall/Nezha_processed_metrics'       
+            # metric_runner(abnormal_dir / "request_metrics.csv", sub_request_dir)
+            # merge_runner(input_processed_metrics_dir, sub_request_dir, sub_metric_dir, output_processed_metrics_dir, metric_output_path)
+            
+            # for metric_path in glob.glob(os.path.join(metric_output_path, '*.csv')):
+            #     process_metric(metric_path, metric_output_path)
 
-            if not os.path.exists(metric_output_path):
-                os.makedirs(metric_output_path)
-            if not os.path.exists(output_dir_merge):
-                os.makedirs(output_dir_merge)
-            if not os.path.exists(output_dir_merge_output):
-                os.makedirs(output_dir_merge_output)
-            if not os.path.exists(output_folder):
-                os.makedirs(output_folder)
-
-            log_trans_runner(input_dir_log, output_dir_log, log_output_path)
-            trace_trans_runner(input_dir_trace, output_dir_trace,trace_output_path)
-            metric_runner(input_dir_metric, output_dir_metric)
-            merge_runner(input_dir_merge, output_dir_merge, output_dir_merge_output, output_folder, metric_output_path)
-            for metric_path in glob.glob(os.path.join(metric_output_path, '*.csv')):
-                process_metric(metric_path, metric_output_path)
+    print("All tasks completed successfully!")
 
 
 if __name__ == "__main__":

@@ -15,6 +15,6 @@ def extract_unique_trace_ids(input_file, output_file):
 
 # Example usage
 if __name__ == "__main__":
-    input_file = '/Users/phoebe/Library/CloudStorage/OneDrive-CUHK-Shenzhen/RCA_Dataset/test/ts/Nezha/trace.csv'  # Replace with your input CSV file path
-    output_file = '/Users/phoebe/Library/CloudStorage/OneDrive-CUHK-Shenzhen/RCA_Dataset/test/ts/Nezha/traceid.csv'  # Desired output CSV file path
+    input_file = 'trace.csv'  # Replace with your input CSV file path
+    output_file = 'traceid.csv'  # Desired output CSV file path
     extract_unique_trace_ids(input_file, output_file)

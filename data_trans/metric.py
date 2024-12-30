@@ -2,12 +2,7 @@ import pandas as pd
 import os
 import ast
 
-def read_csv_file(input_file):
-    return pd.read_csv(input_file)
 
-# 创建输出文件夹的函数
-def create_output_folder(folder_name):
-    os.makedirs(folder_name, exist_ok=True)
 
 # 按服务名分组并保存到不同的文件的函数
 def split_and_save_by_service(df, output_folder):
@@ -160,42 +155,6 @@ def process_folder(input_folder, output_folder):
             save_to_csv(result, output_file)
             print(f"Saved result to {output_file}")
 
-
-def main(input_file, output_folder):
-    # 处理BucketCounts列
-    df = read_csv_file(input_file)
-
-    # 创建输出文件夹
-    create_output_folder(output_folder)
-
-    # 按服务名分组并保存到不同的文件
-    split_and_save_by_service(df, output_folder)
-
-    process_files_in_folder(output_folder)
-
-    # 定义权重
-    weights = [0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10, 10]
-
-    # 计算加权和并添加到文件
-    for filename in os.listdir(output_folder):
-        if filename.endswith('.csv'):
-            file_path = os.path.join(output_folder, filename)
-            df = pd.read_csv(file_path)
-
-            # 计算加权和
-            df['P90'] = df['Latency_P90'].apply(lambda x: calculate_weighted_sum(x, weights)) / 10
-            df['P95'] = df['Latency_P95'].apply(lambda x: calculate_weighted_sum(x, weights)) / 5
-            df['P99'] = df['Latency_P99'].apply(lambda x: calculate_weighted_sum(x, weights))
-
-            # 添加client和server延迟的列
-            df = add_latency_columns(df)
-
-            # 只保留需要的列
-            df = df[['TimeUnix', 'client_P90', 'client_P95', 'client_P99', 'server_P90', 'server_P95', 'server_P99']]
-
-            # 保存修改后的DataFrame，覆盖原文件
-            df.to_csv(file_path, index=False)
-            print(f"Updated and saved {file_path}")
 
 
 

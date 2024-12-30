@@ -1,6 +1,7 @@
 import pandas as pd
 from datetime import datetime
 import os
+from trace_id import extract_unique_trace_ids
 
 
 def calculate_end_time_unix_nano(csv_file, outputfile):
@@ -38,12 +39,12 @@ def calculate_end_time_unix_nano(csv_file, outputfile):
     # Add the EndTimeUnixNano as a new column in the original DataFrame
     df['EndTimeUnixNano'] = end_time_nano_list
 
+
     # Save the updated DataFrame to a new CSV file
     df.to_csv(outputfile, index=False)
 
 
-
-def process_trace_data(output_file, trace_output_file):
+def process_trace_data(output_file, output_dir, traceid_output_dir):
     # Read the CSV file
     df = pd.read_csv(output_file)
 
@@ -75,22 +76,44 @@ def process_trace_data(output_file, trace_output_file):
             'ParentID': row['ParentSpanId'],
             'PodName': row['ServiceName'],
             'OperationName': row['SpanName'],
+            'Timestamp': row['Timestamp'],
             'StartTimeUnixNano': start_time_nano,
             'EndTimeUnixNano': end_time_nano
         })
 
-    # Create a DataFrame for the results
     results_df = pd.DataFrame(results)
-    file_exists = os.path.isfile(trace_output_file)
 
-    # Save the updated DataFrame to a new CSV file
-    results_df.to_csv(output_file, index=False)
-    results_df.to_csv(trace_output_file, mode='a', header=not file_exists, index=False)
+    results_df['Timestamp'] = pd.to_datetime(results_df['Timestamp'])
+    start_time = results_df['Timestamp'].min()
+    # hour_time = start_time.hour
+
+    # Split into 10 one-minute chunks
+    for i in range(10):
+        chunk_start = start_time + pd.Timedelta(minutes=i)
+        chunk_end = chunk_start + pd.Timedelta(minutes=1)
+
+        hour_time = chunk_start.hour
+
+        # Filter rows for the current chunk
+        chunk_df = results_df[(results_df['Timestamp'] >= chunk_start) & (results_df['Timestamp'] < chunk_end)]
+
+        # Skip if the chunk is empty
+        if chunk_df.empty:
+            continue
+
+        # Generate the file name
+        filename = f"{hour_time}_{chunk_start:%M}_trace.csv"
+        chunk_output_path = output_dir / filename
+
+        # Save the chunk to a CSV file
+        chunk_df.to_csv(chunk_output_path, index=False)
+        print(f"Saved chunk to {chunk_output_path}")
+
+        trace_id_filename = filename = f"{hour_time}_{chunk_start:%M}_traceid.csv"
+        traceid_chunk_file = traceid_output_dir / trace_id_filename
+
+        # 输入trace file，输出traceid file
+        extract_unique_trace_ids(chunk_output_path, traceid_chunk_file)
 
 
-# Example usage
-# if __name__ == "__main__":
-#     csv_file = '../traces.csv'  # Replace with your input CSV file path
-#     outputfile = 'Nezha/1021/trace'
-#     calculate_end_time_unix_nano(csv_file, outputfile)
-#     process_trace_data(outputfile)
+
